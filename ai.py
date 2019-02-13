@@ -18,6 +18,7 @@ class AI(RealtimeAI):
         super(AI, self).__init__(world)
         self.done = False
 
+
     def initialize(self):
         print('initialize')
 
@@ -45,29 +46,52 @@ class AI(RealtimeAI):
 
     def decide(self):
         print('decide')
+        if self.my_side == 'Police':
+            self.police_action()
+        else:
+            pass
+        # my_agents = self.world.polices if self.my_side == 'Police' else self.world.terrorists
+        # for agent in my_agents:
+        #     if agent.status == EAgentStatus.Dead:
+        #         continue
+        #
+        #     doing_bomb_operation = agent.defusion_remaining_time != -1 if self.my_side == 'Police' else agent.planting_remaining_time != -1
+        #
+        #     if doing_bomb_operation:
+        #         self._agent_print(agent.id, 'Continue Bomb Operation')
+        #         continue
+        #
+        #     bombsite_direction = self._find_bombsite_direction(agent)
+        #     if bombsite_direction == None:
+        #         self._agent_print(agent.id, 'Random Move')
+        #         self.move(agent.id, random.choice(self._empty_directions(agent.position)))
+        #     else:
+        #         self._agent_print(agent.id, 'Start Bomb Operation')
+        #         if self.my_side == 'Police':
+        #             self.defuse(agent.id, bombsite_direction)
+        #         else:
+        #             self.plant(agent.id, bombsite_direction)
 
-        my_agents = self.world.polices if self.my_side == 'Police' else self.world.terrorists
-        for agent in my_agents:
-            if agent.status == EAgentStatus.Dead:
-                continue
+    def police_action(self):
+        sorted_bombs_list = self.get_sorted_bombs_list(self, self.world.polices[0].position, -1)
 
-            doing_bomb_operation = agent.defusion_remaining_time != -1 if self.my_side == 'Police' else agent.planting_remaining_time != -1
+    def get_sorted_bombs_list(self, source, number):  # finds nearest bombs from the source position
+        pass
 
-            if doing_bomb_operation:
-                self._agent_print(agent.id, 'Continue Bomb Operation')
-                continue
+    def cover_bombsite(self, sorted_bombs_list, ratio):  # defines each bomb is covered by each police
+        pass
 
-            bombsite_direction = self._find_bombsite_direction(agent)
-            if bombsite_direction == None:
-                self._agent_print(agent.id, 'Random Move')
-                self.move(agent.id, random.choice(self._empty_directions(agent.position)))
-            else:
-                self._agent_print(agent.id, 'Start Bomb Operation')
-                if self.my_side == 'Police':
-                    self.defuse(agent.id, bombsite_direction)
-                else:
-                    self.plant(agent.id, bombsite_direction)
+    def police_move(self):
+        pass
 
+    def police_defuse(self):
+        pass
+
+    def police_escape(self):
+        pass
+
+    def police_patrol(self):
+        pass
 
     def plant(self, agent_id, bombsite_direction):
         self.send_command(PlantBomb(id=agent_id, direction=bombsite_direction))
@@ -83,7 +107,6 @@ class AI(RealtimeAI):
 
     def _empty_directions(self, position):
         empty_directions = []
-
         for direction in self.DIRECTIONS:
             pos = self._sum_pos_tuples((position.x, position.y), self.DIR_TO_POS[direction])
             if self.world.board[pos[1]][pos[0]] == ECell.Empty:
@@ -114,3 +137,5 @@ class AI(RealtimeAI):
 
     def _agent_print(self, agent_id, text):
         print('Agent[{}]: {}'.format(agent_id, text))
+
+
