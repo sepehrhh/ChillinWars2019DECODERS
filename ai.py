@@ -93,7 +93,7 @@ class AI(RealtimeAI):
                 bombs_list.append(node)
             for adj in adjs:
                 newNode = Position(x=node.x + adj[0], y=node.y + adj[1])
-                if newNode not in checked and self.check_node(newNode):
+                if newNode not in checked and self.check_empty_node(newNode):
                     Q.put(newNode)
 
         return bombs_list
@@ -134,6 +134,7 @@ class AI(RealtimeAI):
         node_content = self.world.board[node.y][node.x]
         if node_content != ECell.Empty and node_content != ECell.Wall:
             return True
+        return False
 
     def plant(self, agent_id, bombsite_direction):
         self.send_command(PlantBomb(id=agent_id, direction=bombsite_direction))
