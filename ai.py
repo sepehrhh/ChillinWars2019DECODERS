@@ -127,6 +127,8 @@ class AI(RealtimeAI):
         if node_content == ECell.Empty:
             return True
 
+        return False
+
 
     def is_bomb(self, node):
         node_content = self.world.board[node.y][node.x]
