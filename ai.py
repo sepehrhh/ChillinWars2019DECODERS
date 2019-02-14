@@ -76,7 +76,28 @@ class AI(RealtimeAI):
         sorted_bombs_list = self.get_sorted_bombs_list(self, self.world.polices[0].position, -1)
 
     def get_sorted_bombs_list(self, source, number):  # finds nearest bombs from the source position
-        pass
+        import queue
+        bombs_list = [] # [position]
+        checked = []
+        Q = queue.Queue()
+        Q.put(source)
+        adjs = [[-1,-1],
+                [+1,-1],
+                [-1,+1],
+                [+1,+1]]
+
+        while not Q.empty() and (len(bombs_list) < number or number == -1):
+            node = Q.get() # bfs is checking for bombs from the source to board edges ...
+            checked.append(node)
+            if self.is_bomb(node):
+                bombs_list.append(node)
+            for adj in adjs:
+                newNode = Position(x=node.x + adj[0], y=node.y + adj[1])
+                if newNode not in checked and self.check_node(newNode):
+                    Q.put(newNode)
+
+        return bombs_list
+
 
     def cover_bombsite(self, sorted_bombs_list, ratio):  # defines each bomb is covered by each police
         pass
@@ -92,6 +113,25 @@ class AI(RealtimeAI):
 
     def police_patrol(self):
         pass
+
+    def check_empty_node(self, node): #check existance of this node and emptyness
+
+        #check for existance
+        if node.x < 0 or node.x >= self.world.width:
+            return False
+        if node.y < 0 or node.y >= self.world.height:
+            return False
+
+        #check for emptyness
+        node_content = self.world.board[node.y][node.x]
+        if node_content == ECell.Empty:
+            return True
+
+
+    def is_bomb(self, node):
+        node_content = self.world.board[node.y][node.x]
+        if node_content != ECell.Empty and node_content != ECell.Wall:
+            return True
 
     def plant(self, agent_id, bombsite_direction):
         self.send_command(PlantBomb(id=agent_id, direction=bombsite_direction))
