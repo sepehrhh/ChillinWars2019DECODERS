@@ -4,7 +4,6 @@
 import random
 from enum import Enum
 import queue
-#from pprint import pprint
 # chillin imports
 from chillin_client import RealtimeAI
 
@@ -13,11 +12,25 @@ from ks.models import (World, Police, Terrorist, Bomb, Position, Constants,
                        ESoundIntensity, ECell, EAgentStatus)
 from ks.commands import DefuseBomb, PlantBomb, Move, ECommandDirection
 
+
 class PoliceRegion:
-    def __init__(self,_bombsites = [],_police = None):
+    def __init__(self, _bombsites=[], _police=None):
         self.bombSites = _bombsites
         self.police = _police
-        self.police_current_target_index = None if _bombsites == [] else random.randint(0, len(_bombsites) - 1)
+        self.police_current_target_index = None if _bombsites == [] else random.randint(0,len(_bombsites) - 1)
+
+
+class TerroristRegion:
+    def __init__(self, _bombsites=[], _terrorist=None):
+        self.bombSites = _bombsites
+        self.terrorist = _terrorist
+        self.terrorist_current_target_index = None if _bombsites == [] else random.randint(0, len(_bombsites) - 1)
+
+
+class EPoliceState(Enum):
+    PatrolInRegion = 0
+    DefusingBomb = 1
+    EscapingBomb = 2
 
 
 class AI(RealtimeAI):
@@ -26,9 +39,11 @@ class AI(RealtimeAI):
         super(AI, self).__init__(world)
         self.done = False
         self.police_regions = []
+        self.terrorist_regions = []
         self.polices_assigned_bombs = dict()
+        self.planting_terrorist_ids = []
         self.targeted_bombs = set()
-
+        self.DIRECTION = [[0, -1], [0, +1], [-1, 0], [+1, 0]]
 
 
     def initialize(self):
@@ -57,152 +72,178 @@ class AI(RealtimeAI):
 
     def decide(self):
         print('decide')
-
         if self.my_side == 'Police':
             self.police_action()
         else:
-            pass
-        # my_agents = self.world.polices if self.my_side == 'Police' else self.world.terrorists
-        # for agent in my_agents:
-        #     if agent.status == EAgentStatus.Dead:
-        #         continue
-        #
-        #     doing_bomb_operation = agent.defusion_remaining_time != -1 if self.my_side == 'Police' else agent.planting_remaining_time != -1
-        #
-        #     if doing_bomb_operation:
-        #         self._agent_print(agent.id, 'Continue Bomb Operation')
-        #         continue
-        #
-        #     bombsite_direction = self._find_bombsite_direction(agent)
-        #     if bombsite_direction == None:
-        #         self._agent_print(agent.id, 'Random Move')
-        #         self.move(agent.id, random.choice(self._empty_directions(agent.position)))
-        #     else:
-        #         self._agent_print(agent.id, 'Start Bomb Operation')
-        #         if self.my_side == 'Police':
-        #             self.defuse(agent.id, bombsite_direction)
-        #         else:
-        #             self.plant(agent.id, bombsite_direction)
+            self.terrorist_action()
+
 
     def police_action(self):
-        if self.police_regions == [] or self.current_cycle % 30 == 0:
-            print("make region")
+        if not self.police_regions or self.current_cycle % 30 == 0:
             self.make_regions()
 
-        print(self.current_cycle)
-        polices_queue = self.alive_polices_queue()
-
         self.police_defuse_process()
-        #for region in self.police_regions:
-                # print(region.police,len(region.bombSites),region.police_current_target_index)
-
-        # print("\n------regions totally made-----\n")
-        self.police_procces_regions()
+        self.police_process_move()
 
 
-    def police_procces_regions(self):
-        for region in self.police_regions:
-            if region.police == None:
+    def terrorist_action(self):
+        if not self.terrorist_regions or self.current_cycle % 30 == 0:
+            self.make_regions()
+
+        self.terrorist_plant_process()
+        self.terrorist_process_move()
+
+
+    def police_process_move(self):
+        for police_region in self.police_regions:
+            if police_region.police is None:
                 continue
-            if region.police.id in self.polices_assigned_bombs:
+            if police_region.police.id in self.polices_assigned_bombs:
                 continue
-
-            police = self.police_with_id(region.police.id)
-
+            police = self.police_with_id(police_region.police.id)
             doing_bomb_operation = police.defusion_remaining_time != -1
             if doing_bomb_operation:
                 print("police : {} is doing bomb op".format(police.id))
                 continue
-
-            target = self.choose_current_target(region) # position
-            police = region.police
-            self.police_move(police, target)
-
-
-    def choose_current_target(self, region): #keep or change current target according to self.police_current_target
-
-        region.police = self.police_with_id(region.police.id)
-
-        if self.find_dist(region.police.position, region.bombSites[region.police_current_target_index]) < 2 :
-            region.police_current_target_index += 1
-            region.police_current_target_index %= len(region.bombSites)
-        return region.bombSites[region.police_current_target_index]
+            target = self.choose_current_target(police_region)  # sets target position
+            police = police_region.police
+            self.agents_move(police, target)
 
 
-    def find_dist(self, policePos, bombPos):
+    def police_with_id(self, id_):
+        for p in self.world.polices:
+            if p.id == id_:
+                return p
 
-        posQ = queue.Queue()
-        posQ.put(policePos)
-        distQ = queue.Queue()
-        distQ.put(0)
+
+    def terrorist_process_move(self):
+        for terrorist_region in self.terrorist_regions:
+            if terrorist_region.terrorist is None:
+                continue
+            if terrorist_region.terrorist.id in self.planting_terrorist_ids:
+                continue
+            terrorist = self.terrorist_with_id(terrorist_region.terrorist.id)
+            doing_bomb_operation = terrorist.planting_remaining_time != -1
+            if doing_bomb_operation:
+                print("terrorist : {} is doing bomb op".format(terrorist.id))
+                continue
+            target = self.choose_current_target(terrorist_region)  # sets target position
+            terrorist = terrorist_region.terrorist
+            self.agents_move(terrorist, target)
+
+
+    def terrorist_with_id(self, id_):
+        for t in self.world.terrorists:
+            if t.id == id_:
+                return t
+
+
+    def choose_current_target(self, region):  # keep or change current target according to self.police_current_target
+        if self.my_side == 'Police':
+            region.police = self.police_with_id(region.police.id)
+
+            if self.find_dist(region.police.position, region.bombSites[region.police_current_target_index]) < 2:
+                region.police_current_target_index += 1
+                region.police_current_target_index %= len(region.bombSites)
+            return region.bombSites[region.police_current_target_index]
+        else:
+            region.terrorist = self.terrorist_with_id(region.terrorist.id)
+
+            if self.find_dist(region.terrorist.position, region.bombSites[region.terrorist_current_target_index]) < 2:
+                region.terrorist_current_target_index += 1
+                region.terrorist_current_target_index %= len(region.bombSites)
+            return region.bombSites[region.terrorist_current_target_index]
+
+
+    def find_dist(self, agent_pos, bomb_pos):
+
+        position_queue = queue.Queue()
+        position_queue.put(agent_pos)
+        dist_queue = queue.Queue()
+        dist_queue.put(0)
         checked = set()
-        adjs = [[ 0,-1],
-                [ 0,+1],
-                [-1, 0],
-                [+1, 0]]
 
-        policesPos = {(police.position.x, police.position.y) for police in self.world.polices}
+        adjacency = [[0, -1], [0, +1], [-1, 0], [+1, 0]]
 
-        while not posQ.empty():
-            node = posQ.get()
-            dist = distQ.get()
+        if self.my_side == 'Police':
+            agents_pos = [(police.position.x, police.position.y) for police in self.world.polices]
+        else:
+            agents_pos = [(terrorist.position.x, terrorist.position.y) for terrorist in self.world.terrorists]
+
+        while not position_queue.empty():
+            node = position_queue.get()
+            dist = dist_queue.get()
 
             if (node.x, node.y) in checked:
                 continue
-            if (node.x, node.y) in policesPos and (node.x, node.y) != (policePos.x, policePos.y) :
+            if (node.x, node.y) in agents_pos and (node.x, node.y) != (agent_pos.x, agent_pos.y):
                 continue
 
             checked.add((node.x, node.y))
 
-            for adj in adjs:
+            for adj in adjacency:
                 new_node = Position(x=node.x + adj[0], y=node.y + adj[1])
 
-                if (new_node.x, new_node.y) == (bombPos.x, bombPos.y):
+                if (new_node.x, new_node.y) == (bomb_pos.x, bomb_pos.y):
                     return dist + 1
 
                 elif self.check_empty_node(new_node) and not self.is_bomb(new_node):
-                    posQ.put(new_node)
-                    distQ.put(dist + 1)
+                    position_queue.put(new_node)
+                    dist_queue.put(dist + 1)
 
-        # print("could find a way ...100000")
         return 100000
+
 
     def make_regions(self):
 
-        rand_police = self.world.polices[random.randint(0, len(self.world.polices) - 1)]
-
-        sorted_bombs_list = self.get_sorted_bombs_list(self.world.polices[0].position, 120)
-
+        if self.my_side == 'Police':
+            rand_police = self.world.polices[random.randint(0, len(self.world.polices) - 1)]
+            sorted_bombs_list = self.get_sorted_bombs_list(self.world.polices[0].position, 120)
+        else:
+            rand_terrorist = self.world.terrorists[random.randint(0, len(self.world.terrorists) - 1)]
+            sorted_bombs_list = self.get_sorted_bombs_list(self.world.terrorists[0].position, 120)
         random.shuffle(sorted_bombs_list)
         sorted_bombs_list.reverse()
-        # print("\n\n\n\n print below \n")
-        # for i in sorted_bombs_list:
-        #     print(len(sorted_bombs_list),i.x,i.y)
-        # print("\n\n\n\n\n")
-
-        all_bombs = len(sorted_bombs_list)
-
-        #i so goshad to check the state that ratio is 0 so i add 1
+        all_bombs_num = len(sorted_bombs_list)
         checked = set()
-        polices_queue = self.alive_polices_queue()
+        if self.my_side == 'Police':
+            polices_queue = self.alive_polices_queue()
+            for bomb in sorted_bombs_list:
+                if (bomb.x, bomb.y) in checked:
+                    continue
 
-        for bomb in sorted_bombs_list:
-            if (bomb.x, bomb.y) in checked :
-                continue
+                ratio = all_bombs_num // polices_queue.qsize()
+                if (all_bombs_num / polices_queue.qsize()) % 1 != 0:
+                    ratio += 1
 
-            ratio = all_bombs // polices_queue.qsize()
-            if (all_bombs / polices_queue.qsize()) % 1 != 0:
-                ratio += 1
+                region_bombs = self.get_sorted_bombs_list(bomb, ratio, checked=checked.copy(), verified_bombs=sorted_bombs_list)
+                police_region = PoliceRegion(region_bombs)
+                if not polices_queue.empty():
+                    police_region.police = polices_queue.get()
+                    all_bombs_num -= len(region_bombs)
+                for applied_bomb in region_bombs:
+                    checked.add((applied_bomb.x, applied_bomb.y))
+                self.police_regions.append(police_region)
 
-            region_bombs = self.get_sorted_bombs_list(bomb, ratio , checked = checked.copy(), verifiedBobms = sorted_bombs_list)
-            region = PoliceRegion(region_bombs)
-            if not polices_queue.empty():
-                region.police = polices_queue.get()
-                all_bombs -= len(region_bombs)
-            for applied_bomb in region_bombs:
-                checked.add((applied_bomb.x, applied_bomb.y))
-            self.police_regions.append(region)
+        else:
+            terrorists_queue = self.alive_terrorists_queue()
+            for bomb in sorted_bombs_list:
+                if (bomb.x, bomb.y) in checked:
+                    continue
 
+                ratio = all_bombs_num // terrorists_queue.qsize()
+                if (all_bombs_num / terrorists_queue.qsize()) % 1 != 0:
+                    ratio += 1
+
+                region_bombs = self.get_sorted_bombs_list(bomb, ratio, checked=checked.copy(),
+                                                          verified_bombs=sorted_bombs_list)
+                terrorist_region = TerroristRegion(region_bombs)
+                if not terrorists_queue.empty():
+                    terrorist_region.terrorist = terrorists_queue.get()
+                    all_bombs_num -= len(region_bombs)
+                for applied_bomb in region_bombs:
+                    checked.add((applied_bomb.x, applied_bomb.y))
+                self.terrorist_regions.append(terrorist_region)
 
 
     def alive_polices_queue(self):
@@ -212,144 +253,149 @@ class AI(RealtimeAI):
                q.put(police)
         return q
 
-    def get_nearest_unassigned_police(self,source):
-        checked = set()
-        adjs = [[0, -1],
-                [0, +1],
-                [-1, 0],
-                [+1, 0]]
-        policesPos = {(police.position.x, police.position.y) : police.id for police in self.world.polices}
-        Q = queue.Queue()
-        Q.put(source)
 
-        while not Q.empty():
-            node = Q.get()
-            if(node.x, node.y) in checked:
+    def alive_terrorists_queue(self):
+        terrorists_queue = queue.Queue()
+        for terrorist in self.world.terrorists:
+            if terrorist.status == EAgentStatus.Alive:
+               terrorists_queue.put(terrorist)
+
+        return terrorists_queue
+
+
+    def get_nearest_unassigned_agent(self, source):
+        checked = set()
+        adjacency = [[0, -1], [0, +1], [-1, 0], [+1, 0]]
+        if self.my_side == 'Police':
+            agents_pos = {(police.position.x, police.position.y): police.id for police in self.world.polices}
+        else:
+            agents_pos = {(terrorist.position.x, terrorist.position.y): terrorist.id for terrorist in self.world.terrorists}
+        q = queue.Queue()
+        q.put(source)
+
+        while not q.empty():
+            node = q.get()
+            if (node.x, node.y) in checked:
                 continue
             checked.add((node.x, node.y))
 
-            if (node.x, node.y) in policesPos:
-                if policesPos[(node.x, node.y)] not in self.polices_assigned_bombs:
-                    return policesPos[(node.x, node.y)]
-                continue
+            if (node.x, node.y) in agents_pos:
+                if self.my_side == 'Police':
+                    if agents_pos[(node.x, node.y)] not in self.polices_assigned_bombs:
+                        return agents_pos[(node.x, node.y)]
+                    continue
+                else:
+                    if agents_pos[(node.x, node.y)] not in self.terrorists_assigned_bombs:
+                        return agents_pos[(node.x, node.y)]
+                    continue
 
-            for adj in adjs:
+            for adj in adjacency:
                 new_node = Position(x=node.x + adj[0], y=node.y + adj[1])
 
                 if self.check_empty_node(new_node) and not self.is_bomb(new_node):
-                    Q.put(new_node)
+                    q.put(new_node)
 
 
-    def get_sorted_bombs_list(self, source, number, checked = set() , verifiedBobms = None):  # finds nearest bombs from the source position
+    def get_sorted_bombs_list(self, source, number, checked=None, verified_bombs=None):
+        if checked is None:
+            checked = set()
         bombs_list = []  # [position]
-        if verifiedBobms is not None:
-            verifiedBobms = {(b.x,b.y) for b in verifiedBobms}
-        Q = queue.Queue()
-        Q.put(source)
+        if verified_bombs is not None:
+            verified_bombs = {(b.x, b.y) for b in verified_bombs}
+        q = queue.Queue()
+        q.put(source)
         adjs = [[0, -1],
                 [0, +1],
                 [-1, 0],
                 [+1, 0]]
 
-        while not Q.empty() and len(bombs_list) < number:
+        while not q.empty() and len(bombs_list) < number:
 
-            node = Q.get()  # bfs is checking for bombs from the source to board edges ...
+            node = q.get()  # bfs is checking for bombs from the source to board edges ...
 
             if (node.x, node.y) in checked:
                 continue
 
             checked.add((node.x, node.y))
 
-            if verifiedBobms is not None:
-                if (node.x, node.y) in verifiedBobms:
+            if verified_bombs is not None:
+                if (node.x, node.y) in verified_bombs:
                     bombs_list.append(node)
                     if (node.x, node.y) != (source.x, source.y):
                         continue
 
-
             elif self.is_bomb(node):
                 bombs_list.append(node)
                 if (node.x, node.y) != (source.x, source.y):
-                    continue   # cause we cant see pass the bomb so we dont see its adjs
+                    continue   # cause we cant see pass the bomb so we do not see its adjacent
 
             for adj in adjs:
                 new_node = Position(x=node.x + adj[0], y=node.y + adj[1])
                 if self.check_empty_node(new_node):
-                    Q.put(new_node)
+                    q.put(new_node)
 
         return bombs_list
+
 
     def cover_bombsite(self, sorted_bombs_list, ratio):  # defines each bomb is covered by each police
         pass
 
-    def police_move(self, police, target):
 
-        police = self.police_with_id(police.id)
+    def agents_move(self, agent, target):
 
-        pos = police.position
+        if self.my_side == 'Police':
+            agent = self.police_with_id(agent.id)
+        else:
+            agent = self.terrorist_with_id(agent.id)
 
-        # print("police {} from ({} , {}) is going to ({} , {})".format(police.id, pos.x, pos.y, target.x, target.y))
-
+        pos = agent.position
         dist = self.find_dist(pos, target)
-
-        polices_pos = {(p.position.x, p.position.y) for p in self.world.polices}
-
+        if self.my_side == 'Police':
+            agents_pos = [(p.position.x, p.position.y) for p in self.world.polices]
+        else:
+            agents_pos = [(t.position.x, t.position.y) for t in self.world.terrorists]
 
         node = Position(pos.x, pos.y + 1)
-        nodetup = (node.x,node.y)
+        node_tuple = (node.x, node.y)
 
-        if self.check_empty_node(node) and not self.is_bomb(node) and nodetup not in polices_pos and self.find_dist(node, target) + 1 == dist:
-            # print(police.id, "Down" ,self.find_dist(node, target) , "<" ,dist , self.check_empty_node(node) , (node.x , node.y))
-            self.move(police.id,  ECommandDirection.Down)
+        if self.check_empty_node(node) and not self.is_bomb(node) and node_tuple not in agents_pos and self.find_dist(node, target) + 1 == dist:
+            self.move(agent.id, ECommandDirection.Down)
             return
 
-
         node = Position(pos.x + 1, pos.y)
-        nodetup = (node.x, node.y)
-        if self.check_empty_node(node) and not self.is_bomb(node) and nodetup not in polices_pos and self.find_dist(node, target) + 1 == dist:
-            # print(police.id, "Right" ,self.find_dist(node, target) , "<" ,dist , self.check_empty_node(node) , (node.x , node.y))
-            self.move(police.id, ECommandDirection.Right)
+        node_tuple = (node.x, node.y)
+        if self.check_empty_node(node) and not self.is_bomb(node) and node_tuple not in agents_pos and self.find_dist(node, target) + 1 == dist:
+            self.move(agent.id, ECommandDirection.Right)
             return
 
         node = Position(pos.x, pos.y - 1)
-        nodetup = (node.x, node.y)
-        if self.check_empty_node(node) and not self.is_bomb(node) and nodetup not in polices_pos and self.find_dist(node, target) + 1 == dist:
-            # print(police.id, "Up" ,self.find_dist(node, target) , "<" ,dist , self.check_empty_node(node) , (node.x , node.y))
-            self.move(police.id, ECommandDirection.Up)
+        node_tuple = (node.x, node.y)
+        if self.check_empty_node(node) and not self.is_bomb(node) and node_tuple not in agents_pos and self.find_dist(node, target) + 1 == dist:
+            self.move(agent.id, ECommandDirection.Up)
             return
-
 
         node = Position(pos.x - 1, pos.y)
-        nodetup = (node.x, node.y)
-        if self.check_empty_node(node) and not self.is_bomb(node) and nodetup not in polices_pos and self.find_dist(node, target) + 1 == dist:
-            # print(police.id, "Left" ,self.find_dist(node, target) , "<" ,dist , self.check_empty_node(node) , (node.x , node.y))
-            self.move(police.id, ECommandDirection.Left)
+        node_tuple = (node.x, node.y)
+        if self.check_empty_node(node) and not self.is_bomb(node) and node_tuple not in agents_pos and self.find_dist(node, target) + 1 == dist:
+            self.move(agent.id, ECommandDirection.Left)
             return
 
-        # print("couldnt find a way")
-
-    def police_with_id(self, id_):
-        for p in self.world.polices:
-            if p.id == id_:
-                return p
 
     def assign_bombs(self):
         for bomb in self.world.bombs:
-
-            print("bmb did finded")
+            print("bomb founded")
             bomb_node = (bomb.position.x, bomb.position.y)
             if bomb_node in self.targeted_bombs:
                 continue
 
-            police_id = self.get_nearest_unassigned_police(bomb.position)
-            if police_id is None:
+            agent_id = self.get_nearest_unassigned_agent(bomb.position)
+            if agent_id is None:
                 continue
+            print("bomb in ({},{}) assigned to agent : {}".format(bomb.position.x, bomb.position.y, agent_id))
 
-
-            print("bomb in ({},{}) assigned to police : {}".format(bomb.position.x,bomb.position.y,police_id))
-
-            self.polices_assigned_bombs[police_id] = bomb
+            self.polices_assigned_bombs[agent_id] = bomb
             self.targeted_bombs.add(bomb_node)
+
 
     def police_defuse_process(self):
 
@@ -369,9 +415,8 @@ class AI(RealtimeAI):
                 removing_ids.append(police_id)
                 continue
 
-
-            if self.find_dist(police.position, bomb.position) > 1: # still move to bomb
-                self.police_move(police, bomb.position)
+            if self.find_dist(police.position, bomb.position) > 1:  # still move to bomb
+                self.agents_move(police, bomb.position)
 
             elif bombsite_direction is not None:
 
@@ -385,32 +430,39 @@ class AI(RealtimeAI):
                 self._agent_print(police, 'Start Bomb Operation')
                 self.defuse(police.id, bombsite_direction)
 
-
-
         for id_ in removing_ids:
             del self.polices_assigned_bombs[id_]
 
         for bomb_ in removing_bombs:
             self.targeted_bombs.remove(bomb_)
 
-    def can_defuse(self, police, bomb): # should assess if poice can defuse bomb or not
+
+    def can_defuse(self, police, bomb):  # should assess if poice can defuse bomb or not
         arriving_time = self.find_dist(police.position, bomb.position) * self.cycle_duration + 0.2
 
         return arriving_time + self.world.constants.bomb_defusion_time < bomb.explosion_remaining_time
 
 
-    def police_escape(self):
-        pass
+    def terrorist_plant_process(self):
+        for terrorist in self.world.terrorists:
+            if terrorist.id in self.planting_terrorist_ids:
+                if terrorist.planting_remaining_time == -1:
+                    self.planting_terrorist_ids.remove(terrorist.id)
+                continue
+            bombsite_direction = self._find_bombsite_direction(terrorist)
 
-    def police_patrol(self):
-        pass
+            if self._find_bombsite_direction(terrorist) is not None:
+                self._agent_print(terrorist, 'Start Bomb Operation')
+                self.planting_terrorist_ids.append(terrorist.id)
+                self.plant(terrorist.id, bombsite_direction)
+
 
     def check_empty_node(self, node):  # check existance of this node and emptyness
 
         # check for existance
-        if node.y not in range(0, len(self.world.board)):
+        if node.x < 0 or node.x >= self.world.width:
             return False
-        if node.x not in range(0, len(self.world.board[0])):
+        if node.y < 0 or node.y >= self.world.height:
             return False
 
         # check for emptyness
@@ -420,11 +472,13 @@ class AI(RealtimeAI):
 
         return False
 
+
     def is_bomb(self, node):
         node_content = self.world.board[node.y][node.x]
         if node_content != ECell.Wall and node_content != ECell.Empty:
             return True
         return False
+
 
     def plant(self, agent_id, bombsite_direction):
         self.send_command(PlantBomb(id=agent_id, direction=bombsite_direction))
